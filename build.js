@@ -9,6 +9,7 @@ import { execSync } from 'child_process';
 const require = createRequire(import.meta.url);
 const pkg = require('./package.json');
 const isProd = process.env.NODE_ENV === 'production' || process.argv.includes('--prod');
+const EXTENSION_DIR = 'dist/extension';
 
 let _commitHash = null;
 const getCommitHash = () => {
@@ -54,12 +55,15 @@ const userscriptBanner = `// ==UserScript==
 // ==/UserScript==
 `;
 
-function writeExtensionManifest() {
+function createExtensionManifest({ profile = 'official' } = {}) {
+  const isOfficial = profile === 'official';
+  const displayName = isOfficial ? 'Gemini Watermark Remover' : 'Gemini Watermark Remover Local';
   const manifest = {
     manifest_version: 3,
-    name: 'Gemini Watermark Remover',
+    name: displayName,
+    short_name: isOfficial ? 'GWR' : 'GWR Local',
     version: pkg.version,
-    description: pkg.description,
+    description: isOfficial ? pkg.description : `${pkg.description} (local test build)`,
     author: pkg.author,
     icons: {
       16: 'assets/icon-16.png',
@@ -72,7 +76,7 @@ function writeExtensionManifest() {
       'activeTab'
     ],
     action: {
-      default_title: 'Gemini Watermark Remover',
+      default_title: displayName,
       default_icon: {
         16: 'assets/icon-16.png',
         32: 'assets/icon-32.png',
@@ -120,16 +124,45 @@ function writeExtensionManifest() {
     ]
   };
 
-  mkdirSync('dist/extension', { recursive: true });
-  writeFileSync('dist/extension/manifest.json', `${JSON.stringify(manifest, null, 2)}\n`);
+  if (!isOfficial) {
+    manifest.version_name = `${pkg.version}+local.${getCommitHash()}`;
+  }
+
+  return manifest;
 }
 
-function copyExtensionStaticAssets() {
-  mkdirSync('dist/extension/assets', { recursive: true });
-  cpSync('src/extension/assets', 'dist/extension/assets', { recursive: true });
-  cpSync('src/extension/popup.html', 'dist/extension/popup.html');
-  cpSync('src/extension/popup.css', 'dist/extension/popup.css');
-  cpSync('src/extension/popup.js', 'dist/extension/popup.js');
+function writeExtensionManifest(outputDir = EXTENSION_DIR, options = { profile: 'local' }) {
+  const manifest = createExtensionManifest(options);
+  mkdirSync(outputDir, { recursive: true });
+  writeFileSync(join(outputDir, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+function copyExtensionStaticAssets(outputDir = EXTENSION_DIR) {
+  mkdirSync(join(outputDir, 'assets'), { recursive: true });
+  cpSync('src/extension/assets', join(outputDir, 'assets'), { recursive: true });
+  cpSync('src/extension/popup.html', join(outputDir, 'popup.html'));
+  cpSync('src/extension/popup.css', join(outputDir, 'popup.css'));
+  cpSync('src/extension/popup.js', join(outputDir, 'popup.js'));
+}
+
+function cleanDistBuildOutputs() {
+  if (!existsSync('dist')) return;
+  const preservedReleasesDir = join('dist', 'releases');
+  for (const entry of [
+    'app.js',
+    'dev-preview.html',
+    'extension',
+    'extension-local',
+    'index.html',
+    'tampermonkey-worker-probe.html',
+    'tampermonkey-worker-probe.user.js',
+    'userscript',
+    'workers'
+  ]) {
+    const target = join('dist', entry);
+    if (existsSync(target)) rmSync(target, { recursive: true });
+  }
+  mkdirSync(preservedReleasesDir, { recursive: true });
 }
 
 const copyAssetsPlugin = {
@@ -353,10 +386,10 @@ const extensionServiceWorkerCtx = await esbuild.context({
 
 console.log(`🚀 Starting build process... [${isProd ? 'PRODUCTION' : 'DEVELOPMENT'}]`);
 
-if (existsSync('dist')) rmSync('dist', { recursive: true });
+cleanDistBuildOutputs();
 mkdirSync('dist/userscript', { recursive: true });
 mkdirSync('dist/workers', { recursive: true });
-mkdirSync('dist/extension/assets', { recursive: true });
+mkdirSync(join(EXTENSION_DIR, 'assets'), { recursive: true });
 writeExtensionManifest();
 copyExtensionStaticAssets();
 
@@ -409,6 +442,7 @@ if (isProd) {
       filename?.startsWith('assets')
     ) {
       copyExtensionStaticAssets();
+      writeExtensionManifest();
     }
   });
 

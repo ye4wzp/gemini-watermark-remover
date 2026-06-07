@@ -28,6 +28,7 @@ pnpm package:extension
 - `package.json` 中的 package/sdk 入口仍与实际发布源码布局一致
 - 生成后的 userscript 元数据使用当前 `package.json` 版本号
 - `dist/releases/` 下已重新生成 Chrome 插件 zip、sha256 文件和 `latest-extension.json`，用于 GitHub Release 和手动安装备用入口
+- `dist/extension` 下的未打包插件是本地测试版；正式发布 manifest 只写入 `dist/releases/` 里的 zip
 
 ## 版本元数据
 
@@ -42,7 +43,7 @@ pnpm package:extension
 - 验证 Gemini 页面预览图替换链路正常
 - 验证 Gemini 原生复制/下载动作仍返回去水印后的结果
 - 验证预览图处理失败时页面原图仍保持可见
-- 从 `dist/extension` 加载未打包 Chrome 插件，验证弹窗开关、Gemini 在线工具链接、通用去水印链接和 GitHub 反馈链接
+- 从 `dist/extension` 加载未打包本地 Chrome 插件，验证弹窗开关、Gemini 在线工具链接、通用去水印链接和 GitHub 反馈链接；确认扩展卡片显示为 `Gemini Watermark Remover Local`
 - 确认线上 Chrome Web Store 商店页指向：
   `https://chromewebstore.google.com/detail/gemini-watermark-remover/cjlmnfcfnofnglkphbcdclbpimdjkmdf`
 - 如果本次要发布 sdk/package，发包前再做一次 package smoke 检查

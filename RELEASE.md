@@ -28,6 +28,7 @@ Expected result:
 - package/sdk entrypoints in `package.json` still match the published source layout
 - generated userscript metadata uses the current `package.json` version
 - Chrome extension release zip, sha256 file, and `latest-extension.json` are regenerated in `dist/releases/` for GitHub Release and manual fallback installs
+- the unpacked extension in `dist/extension` is a local test build; the official release manifest is written only into the zip in `dist/releases/`
 
 ## Release Metadata
 
@@ -42,7 +43,7 @@ Expected result:
 - verify Gemini page preview replacement works
 - verify native Gemini copy/download still returns processed output
 - verify preview processing failure leaves the original page image visible
-- load the unpacked Chrome extension from `dist/extension` and verify the popup toggle, Gemini online link, general watermark link, and GitHub feedback link
+- load the unpacked local Chrome extension from `dist/extension` and verify the popup toggle, Gemini online link, general watermark link, and GitHub feedback link; confirm the extension card is labeled `Gemini Watermark Remover Local`
 - verify the live Chrome Web Store listing points to:
   `https://chromewebstore.google.com/detail/gemini-watermark-remover/cjlmnfcfnofnglkphbcdclbpimdjkmdf`
 - if you publish the sdk surface, run a final package smoke check before uploading

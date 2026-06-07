@@ -8,6 +8,10 @@ async function readText(relativePath) {
   return readFile(new URL(`../../${relativePath}`, import.meta.url), 'utf8');
 }
 
+async function readBinary(relativePath) {
+  return readFile(new URL(`../../${relativePath}`, import.meta.url));
+}
+
 test('production build should emit a MV3 extension that packages the shared userscript runtime', async () => {
   const build = spawnSync('pnpm', ['build'], {
     cwd: new URL('../..', import.meta.url),
@@ -19,8 +23,11 @@ test('production build should emit a MV3 extension that packages the shared user
 
   const manifest = JSON.parse(await readText('dist/extension/manifest.json'));
   assert.equal(manifest.manifest_version, 3);
-  assert.equal(manifest.name, 'Gemini Watermark Remover');
-  assert.equal(manifest.action.default_title, 'Gemini Watermark Remover');
+  assert.equal(manifest.name, 'Gemini Watermark Remover Local');
+  assert.equal(manifest.short_name, 'GWR Local');
+  assert.equal(manifest.action.default_title, 'Gemini Watermark Remover Local');
+  assert.match(manifest.version_name, new RegExp(`^${manifest.version.replaceAll('.', '\\.')}\\+local\\.`));
+  assert.match(manifest.description, /local test build/);
   assert.equal(manifest.icons['16'], 'assets/icon-16.png');
   assert.equal(manifest.icons['32'], 'assets/icon-32.png');
   assert.equal(manifest.icons['48'], 'assets/icon-48.png');
@@ -51,6 +58,7 @@ test('production build should emit a MV3 extension that packages the shared user
   assert.equal(existsSync(new URL('../../dist/extension/assets/icon-128.png', import.meta.url)), true);
   assert.equal(existsSync(new URL('../../dist/extension/assets/logo-shape.svg', import.meta.url)), true);
   assert.equal(existsSync(new URL('../../dist/extension/assets/github.svg', import.meta.url)), true);
+  assert.equal(existsSync(new URL('../../dist/extension-local', import.meta.url)), false);
 
   const contentMain = await readText('dist/extension/content-main.js');
   assert.match(contentMain, /Gemini Watermark Remover/);
@@ -74,4 +82,51 @@ test('production build should emit a MV3 extension that packages the shared user
   assert.match(popupScript, /storage\?\.local/);
   assert.match(popupScript, /tabs\?\.reload/);
   assert.match(popupScript, /gwrEnabled/);
+});
+
+test('extension package should replace the local debug manifest with the official release manifest', async () => {
+  const packageBuild = spawnSync('pnpm', ['package:extension'], {
+    cwd: new URL('../..', import.meta.url),
+    encoding: 'utf8',
+    shell: process.platform === 'win32'
+  });
+  assert.equal(packageBuild.status, 0, packageBuild.stderr || packageBuild.stdout);
+
+  const latest = JSON.parse(await readText('dist/releases/latest-extension.json'));
+  assert.equal(latest.name, 'gemini-watermark-remover-extension');
+  assert.equal(latest.source, 'dist/extension');
+  assert.equal(existsSync(new URL('../../dist/releases/latest-extension-local.json', import.meta.url)), false);
+
+  const zipText = (await readBinary(`dist/releases/${latest.file}`)).toString('utf8');
+  assert.match(zipText, /"name": "Gemini Watermark Remover"/);
+  assert.match(zipText, /"short_name": "GWR"/);
+  assert.match(zipText, /"default_title": "Gemini Watermark Remover"/);
+  assert.doesNotMatch(zipText, /Gemini Watermark Remover Local/);
+  assert.doesNotMatch(zipText, /local test build/);
+  assert.doesNotMatch(zipText, /version_name/);
+});
+
+test('production build should preserve packaged extension release artifacts', async () => {
+  const packageBuild = spawnSync('pnpm', ['package:extension'], {
+    cwd: new URL('../..', import.meta.url),
+    encoding: 'utf8',
+    shell: process.platform === 'win32'
+  });
+  assert.equal(packageBuild.status, 0, packageBuild.stderr || packageBuild.stdout);
+
+  const latestBefore = await readText('dist/releases/latest-extension.json');
+  const latest = JSON.parse(latestBefore);
+
+  const build = spawnSync('pnpm', ['build'], {
+    cwd: new URL('../..', import.meta.url),
+    encoding: 'utf8',
+    shell: process.platform === 'win32'
+  });
+  assert.equal(build.status, 0, build.stderr || build.stdout);
+
+  assert.equal(existsSync(new URL(`../../dist/releases/${latest.file}`, import.meta.url)), true);
+  assert.equal(existsSync(new URL(`../../dist/releases/${latest.file}.sha256.txt`, import.meta.url)), true);
+  assert.equal(existsSync(new URL('../../dist/releases/latest-extension.json', import.meta.url)), true);
+  assert.equal(existsSync(new URL('../../dist/releases/latest-extension-local.json', import.meta.url)), false);
+  assert.equal(await readText('dist/releases/latest-extension.json'), latestBefore);
 });

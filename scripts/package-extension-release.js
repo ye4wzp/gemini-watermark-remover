@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
 const EXTENSION_DIR = path.resolve('dist/extension');
@@ -112,7 +112,7 @@ function readJson(filePath) {
   return JSON.parse(readFileSync(filePath, 'utf8'));
 }
 
-function createInstallDocs(version) {
+function createInstallDocs(version, { packageBaseName = PACKAGE_BASE_NAME } = {}) {
   const english = `# Gemini Watermark Remover Chrome Extension v${version}
 
 ## Install
@@ -121,7 +121,7 @@ function createInstallDocs(version) {
 2. Open \`chrome://extensions\`.
 3. Enable Developer mode.
 4. Click Load unpacked.
-5. Select the extracted \`${PACKAGE_BASE_NAME}\` folder.
+5. Select the extracted \`${packageBaseName}\` folder.
 
 ## Update
 
@@ -140,7 +140,7 @@ The extension runs on Gemini pages only. It processes generated image previews, 
 2. 打开 \`chrome://extensions\`。
 3. 开启“开发者模式”。
 4. 点击“加载已解压的扩展程序”。
-5. 选择解压后的 \`${PACKAGE_BASE_NAME}\` 文件夹。
+5. 选择解压后的 \`${packageBaseName}\` 文件夹。
 
 ## 更新
 
@@ -154,48 +154,90 @@ The extension runs on Gemini pages only. It processes generated image previews, 
   return { english, chinese };
 }
 
-if (!existsSync(EXTENSION_DIR)) {
-  throw new Error('dist/extension does not exist. Run pnpm build first.');
+function createOfficialManifest(localManifest) {
+  const manifest = structuredClone(localManifest);
+  manifest.name = 'Gemini Watermark Remover';
+  manifest.short_name = 'GWR';
+  manifest.description = manifest.description.replace(/\s+\(local test build\)$/, '');
+  manifest.action = {
+    ...manifest.action,
+    default_title: 'Gemini Watermark Remover'
+  };
+  delete manifest.version_name;
+  return manifest;
 }
 
-const manifestPath = path.join(EXTENSION_DIR, 'manifest.json');
-const manifest = readJson(manifestPath);
-const version = manifest.version;
-if (!version) {
-  throw new Error('dist/extension/manifest.json is missing version.');
+function removeStaleLocalReleaseArtifacts() {
+  if (!existsSync(RELEASE_DIR)) return;
+  for (const entry of readdirSync(RELEASE_DIR, { withFileTypes: true })) {
+    if (entry.name === 'latest-extension-local.json' || entry.name.startsWith('gemini-watermark-remover-extension-local-')) {
+      rmSync(path.join(RELEASE_DIR, entry.name), { recursive: true });
+    }
+  }
+}
+
+function packageExtensionRelease({
+  extensionDir,
+  packageBaseName,
+  latestFile,
+  source
+}) {
+  if (!existsSync(extensionDir)) {
+    throw new Error(`${source} does not exist. Run pnpm build first.`);
+  }
+
+  const manifestPath = path.join(extensionDir, 'manifest.json');
+  const manifest = readJson(manifestPath);
+  const version = manifest.version;
+  if (!version) {
+    throw new Error(`${source}/manifest.json is missing version.`);
+  }
+  const officialManifest = createOfficialManifest(manifest);
+
+  const packageRoot = packageBaseName;
+  const fileEntries = listFiles(extensionDir).map((file) => ({
+    name: `${packageRoot}/${file.relativePath}`,
+    data:
+      file.relativePath === 'manifest.json'
+        ? Buffer.from(`${JSON.stringify(officialManifest, null, 2)}\n`)
+        : readFileSync(file.absolutePath)
+  }));
+
+  const installDocs = createInstallDocs(version, { packageBaseName });
+  fileEntries.push(
+    { name: `${packageRoot}/INSTALL.md`, data: Buffer.from(installDocs.english) },
+    { name: `${packageRoot}/INSTALL_zh.md`, data: Buffer.from(installDocs.chinese) }
+  );
+
+  const zipName = `${packageBaseName}-v${version}.zip`;
+  const zipPath = path.join(RELEASE_DIR, zipName);
+  const zipBuffer = createZip(fileEntries);
+  writeFileSync(zipPath, zipBuffer);
+
+  const sha256 = createHash('sha256').update(zipBuffer).digest('hex');
+  writeFileSync(path.join(RELEASE_DIR, `${zipName}.sha256.txt`), `${sha256}  ${zipName}\n`);
+
+  const latest = {
+    name: packageBaseName,
+    version,
+    file: zipName,
+    sha256,
+    size: statSync(zipPath).size,
+    source
+  };
+  writeFileSync(path.join(RELEASE_DIR, latestFile), `${JSON.stringify(latest, null, 2)}\n`);
+
+  console.log(`Packaged ${zipName}`);
+  console.log(`sha256 ${sha256}`);
+  return latest;
 }
 
 mkdirSync(RELEASE_DIR, { recursive: true });
+removeStaleLocalReleaseArtifacts();
 
-const packageRoot = PACKAGE_BASE_NAME;
-const fileEntries = listFiles(EXTENSION_DIR).map((file) => ({
-  name: `${packageRoot}/${file.relativePath}`,
-  data: readFileSync(file.absolutePath)
-}));
-
-const installDocs = createInstallDocs(version);
-fileEntries.push(
-  { name: `${packageRoot}/INSTALL.md`, data: Buffer.from(installDocs.english) },
-  { name: `${packageRoot}/INSTALL_zh.md`, data: Buffer.from(installDocs.chinese) }
-);
-
-const zipName = `${PACKAGE_BASE_NAME}-v${version}.zip`;
-const zipPath = path.join(RELEASE_DIR, zipName);
-const zipBuffer = createZip(fileEntries);
-writeFileSync(zipPath, zipBuffer);
-
-const sha256 = createHash('sha256').update(zipBuffer).digest('hex');
-writeFileSync(path.join(RELEASE_DIR, `${zipName}.sha256.txt`), `${sha256}  ${zipName}\n`);
-
-const latest = {
-  name: PACKAGE_BASE_NAME,
-  version,
-  file: zipName,
-  sha256,
-  size: statSync(zipPath).size,
+packageExtensionRelease({
+  extensionDir: EXTENSION_DIR,
+  packageBaseName: PACKAGE_BASE_NAME,
+  latestFile: 'latest-extension.json',
   source: 'dist/extension'
-};
-writeFileSync(path.join(RELEASE_DIR, 'latest-extension.json'), `${JSON.stringify(latest, null, 2)}\n`);
-
-console.log(`Packaged ${zipName}`);
-console.log(`sha256 ${sha256}`);
+});
